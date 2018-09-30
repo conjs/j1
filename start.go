@@ -1,49 +1,50 @@
 package main
+
 import (
-	"fmt"
-	"encoding/json"
-	"github.com/tealeg/xlsx"
-	"os"
-	"io/ioutil"
-	"excel_to_json/parseConfig"
-	"strings"
 	"archive/zip"
 	"bytes"
+	"encoding/json"
+	"excel_to_json/parseConfig"
+	"fmt"
+	"github.com/tealeg/xlsx"
+	"io/ioutil"
+	"os"
+	"strings"
+	"unsafe"
 )
+
 func main() {
 	readPath()
 }
-func readPath(){
+func readPath() {
 	println("**** START ****")
 	var config = parseConfig.New("config.json")
 	var itemList = config.Get("data").([]interface{})
-	for _,v := range itemList {
+	for _, v := range itemList {
 		var plat = v.(map[string]interface{})
 		name := plat["name"].(string)
 		inPath := plat["inPath"].(string)
 		serverOutPath := plat["serverOutPath"].(string)
 		clientOutPath := plat["clientOutPath"].(string)
 
-
-
-		println("\n **** PROCESS "+name+"**** \n")
-		processAll(inPath,serverOutPath,clientOutPath)
+		println("\n **** PROCESS " + name + "**** \n")
+		processAll(inPath, serverOutPath, clientOutPath)
 	}
 	fmt.Println("\n **** DONE ****")
 	fmt.Print("\n Press 'Enter' to continue...\n")
 	fmt.Scanln()
 }
 
-func processAll(inpath string,serverPath string,clientPath string){
-	files,_:=ioutil.ReadDir(inpath)
+func processAll(inpath string, serverPath string, clientPath string) {
+	files, _ := ioutil.ReadDir(inpath)
 	var buf bytes.Buffer
 	buf.WriteString("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
 	buf.WriteString("<mysql>\n")
 	buf.WriteString("<database name=\"txtgame\">\n")
 
-	for _,file := range files{
-		itemBytes:=excelOp(inpath,file.Name(),serverPath,clientPath)
-		if itemBytes==""{
+	for _, file := range files {
+		itemBytes := excelOp(inpath, file.Name(), serverPath, clientPath)
+		if itemBytes == "" {
 			continue
 		}
 		buf.WriteString(itemBytes)
@@ -51,15 +52,12 @@ func processAll(inpath string,serverPath string,clientPath string){
 	buf.WriteString("</database>")
 	buf.WriteString("</mysql>")
 
-	createSdata(serverPath,buf.String())
-
+	createSdata(serverPath, buf.String())
 }
 
-
-
-func createSdata(path string,filecontent string){
+func createSdata(path string, filecontent string) {
 	println("create sdata.zip")
-	fzip, _ := os.Create(path+"sdata.zip")
+	fzip, _ := os.Create(path + "sdata.zip")
 	w := zip.NewWriter(fzip)
 
 	defer fzip.Close()
@@ -67,39 +65,42 @@ func createSdata(path string,filecontent string){
 
 	fw, _ := w.Create("sdata.xml")
 	fw.Write([]byte(filecontent))
-
 }
 
-
-
-func excelOp(path string,fileName string,serverPath string,clientPath string)string {
-	if strings.HasPrefix(fileName,"~"){
+func excelOp(path string, fileName string, serverPath string, clientPath string) string {
+	if strings.HasPrefix(fileName, "~") {
 		return ""
 	}
-	println("process "+path+""+fileName)
-	xlFile, err := xlsx.OpenFile(path+fileName)
+	if !strings.HasSuffix(fileName, "xlsx") {
+		return ""
+	}
+	println("process " + path + "" + fileName)
+	xlFile, err := xlsx.OpenFile(path + fileName)
 	if err != nil {
 		fmt.Println("open file error")
 	}
 	sheet := xlFile.Sheets[0]
-	rowLen := len(sheet.Rows)
+	rowLen, s := 0, 0
 
 	celLen := len(sheet.Cols)
-	var field= make([]string, celLen)
-	var types= make([]string, celLen)
+	var field = make([]string, celLen)
+	var types = make([]string, celLen)
 
-	var fieldClient= make([]interface{}, celLen)
+	var fieldClient = make([]interface{}, celLen)
 
-	s := 0
+	for _, row := range sheet.Rows {
+		if row.Cells[0].String() != "" {
+			rowLen++
+		}
+	}
 
 	var cbody = make([][]interface{}, rowLen-1)
 	cbody[0] = fieldClient
 
-
-	fineNameArr := strings.Split(fileName,".")
+	fineNameArr := strings.Split(fileName, ".")
 
 	var buffer bytes.Buffer
-	buffer.WriteString("<table name=\""+fineNameArr[0]+"\">\n")
+	buffer.WriteString("<table name=\"" + fineNameArr[0] + "\">\n")
 
 	for idxRow, row := range sheet.Rows {
 		if idxRow == 0 || idxRow == 1 {
@@ -110,48 +111,78 @@ func excelOp(path string,fileName string,serverPath string,clientPath string)str
 					fieldClient[cellIdx] = text
 					continue
 				}
-				if (idxRow == 1) {
+				if idxRow == 1 {
 					types[cellIdx] = text
 					continue
 				}
 			}
 			continue
 		}
-		buffer.WriteString("<row>")
+		zeroV, _ := row.Cells[0].Int()
+		if field[0] == "id" && zeroV == -1 {
+			continue
+		}
+		fieldContent := []string{}
 
 		var cValue = make([]interface{}, celLen)
-		for cellIdx, cell := range row.Cells {
+		for cellIdx, cellName := range field {
 			if types[cellIdx] == "int" {
-				v, _ := cell.Int64()
+				cValue[cellIdx] = 0
+				if cellIdx < len(row.Cells) {
+					v, _ := row.Cells[cellIdx].Int64()
+					cValue[cellIdx] = v
+				}
+			} else {
+				cValue[cellIdx] = ""
+				if cellIdx < len(row.Cells) {
+					v := row.Cells[cellIdx].String()
+					cValue[cellIdx] = v
 
-				cValue[cellIdx] = v
-
-			} else{
-				itemCell:=strings.TrimSpace(cell.String())
-
-				cValue[cellIdx] = itemCell
+				}
 			}
-			buffer.WriteString("<field name=\""+field[cellIdx]+"\">"+cell.String()+"</field>")
+			tempV := InterfaceToJsonString(cValue[cellIdx])
+			if tempV == "nil" {
+				tempV = ""
+			}
+			fieldContent = append(fieldContent, "<field name=\""+cellName+"\">"+tempV+"</field>")
 		}
-		buffer.WriteString("</row>\n")
-		cbody[s+1] = cValue
 
+		if len(fieldContent) > 0 {
+			buffer.WriteString("<row>")
+			for _, item := range fieldContent {
+				buffer.WriteString(item)
+			}
+			buffer.WriteString("</row>\n")
+		}
+
+		cbody[s+1] = cValue
 		s++
 	}
 	buffer.WriteString("</table>\n")
-	cbyte,_ := json.Marshal(cbody)
+	cbyte, _ := json.Marshal(cbody)
 
-	ioutil.WriteFile(clientPath+getOutputFileName(fileName),cbyte,0666)
+	ioutil.WriteFile(clientPath+getOutputFileName(fileName), cbyte, 0666)
 	return buffer.String()
 }
 
-func getOutputFileName(excelName string) string{
-	arr := strings.Split(excelName,"-")
-	var len = len(arr)
-	if(len==1){
-		r := strings.Split(excelName,".")
-		return r[0]+".json"
+func InterfaceToJsonString(d interface{}) string {
+	data, err := json.Marshal(d)
+	if err != nil {
+		return ""
 	}
-	r := strings.Split(arr[1],".")
-	return r[0]+".json"
+	return BytesToString(data)
+}
+func BytesToString(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
+}
+
+func getOutputFileName(excelName string) string {
+	arr := strings.Split(excelName, "-")
+	var len = len(arr)
+	if len == 1 {
+		r := strings.Split(excelName, ".")
+		return r[0] + ".json"
+	}
+	r := strings.Split(arr[1], ".")
+	return r[0] + ".json"
 }

@@ -130,6 +130,9 @@ func excelOp(path string, fileName string, serverPath string, clientPath string)
 				cValue[cellIdx] = 0
 				if cellIdx < len(row.Cells) {
 					v, _ := row.Cells[cellIdx].Int64()
+					if v < 0 {
+						v = 0
+					}
 					cValue[cellIdx] = v
 				}
 			} else {
@@ -147,8 +150,13 @@ func excelOp(path string, fileName string, serverPath string, clientPath string)
 			if ok {
 				tempV = tempValue
 			} else {
-				tempValue := cValue[cellIdx].(int64)
-				tempV = IntToString(tempValue)
+				tempValue, ok := cValue[cellIdx].(int)
+				if !ok {
+					tempValue2 := cValue[cellIdx].(int64)
+					tempV = IntToString(tempValue2)
+				} else {
+					tempV = IntToString(tempValue)
+				}
 			}
 			if tempV == "nil" {
 				tempV = ""

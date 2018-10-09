@@ -140,11 +140,25 @@ func excelOp(path string, fileName string, serverPath string, clientPath string)
 
 				}
 			}
-			tempV := InterfaceToJsonString(cValue[cellIdx])
+
+			tempV := ""
+			//tempV := InterfaceToJsonString(cValue[cellIdx])
+			tempValue, ok := cValue[cellIdx].(string)
+			if ok {
+				tempV = tempValue
+			} else {
+				tempValue := cValue[cellIdx].(int64)
+				tempV = IntToString(tempValue)
+			}
 			if tempV == "nil" {
 				tempV = ""
 			}
-			fieldContent = append(fieldContent, "<field name=\""+cellName+"\">"+tempV+"</field>")
+			itemV := "<field name=\"" + cellName + "\">"
+			if len(tempV) > 0 {
+				itemV += tempV
+			}
+			itemV += "</field>"
+			fieldContent = append(fieldContent, itemV)
 		}
 
 		if len(fieldContent) > 0 {
@@ -170,6 +184,9 @@ func InterfaceToJsonString(d interface{}) string {
 	if err != nil {
 		return ""
 	}
+	if len(data) == 0 {
+		return ""
+	}
 	return BytesToString(data)
 }
 func BytesToString(b []byte) string {
@@ -185,4 +202,7 @@ func getOutputFileName(excelName string) string {
 	}
 	r := strings.Split(arr[1], ".")
 	return r[0] + ".json"
+}
+func IntToString(n interface{}) string {
+	return fmt.Sprintf("%d", n)
 }
